@@ -11,14 +11,13 @@ CORS(app)
 logging.basicConfig(level=logging.INFO)
 
 API_URL = "https://psi-api-cxgna3aqbvekg0hu.southeastasia-01.azurewebsites.net/api/IcsrFields"
-
 nsmap = {"xsi": "http://www.w3.org/2001/XMLSchema-instance"}
 
 def strip_xmlns(xml_raw: str) -> str:
     return re.sub(r'\sxmlns="[^"]+"', "", xml_raw)
 
 def load_xpath_mapping_from_api():
-    resp = requests.get(API_URL, timeout=30)
+    resp = requests.get(API_URL, timeout=10)
     resp.raise_for_status()
     data = resp.json()
     if isinstance(data, dict):
@@ -34,6 +33,14 @@ def load_xpath_mapping_from_api():
         config = {"xpath": clean_xpath, "repeatable": is_repeatable}
         xpath_map.setdefault(element_header, []).append(config)
     return xpath_map
+
+XPATH_CACHE = None
+
+def get_xpath_map():
+    global XPATH_CACHE
+    if XPATH_CACHE is None:
+        XPATH_CACHE = load_xpath_mapping_from_api()
+    return XPATH_CACHE
 
 def parse_e2b_xml_with_xpath_bytes(xml_bytes, xpath_map):
     try:
@@ -164,13 +171,17 @@ def validate_json_dict(data):
             errors.append(msg)
     return errors
 
+@app.route("/", methods=["GET"])
+def health():
+    return jsonify({"status": "ok"}), 200
+
 @app.route("/api/process-e2b", methods=["POST"])
 def process_e2b():
     files = request.files.getlist("file")
     if not files or len(files) == 0:
         return jsonify({"message": "No files uploaded."}), 400
     try:
-        xpath_map = load_xpath_mapping_from_api()
+        xpath_map = get_xpath_map()
     except Exception as e:
         logging.error(f"Failed to load XPath mapping: {e}")
         return jsonify({"message": "Failed to load XPath mapping from API.", "error": str(e)}), 502
